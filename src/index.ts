@@ -16,6 +16,9 @@ import { handleAuth } from "./routes/auth";
 import { handleCart } from "./routes/cart";
 import { handleOrders } from "./routes/orders";
 import { handleProducts } from "./routes/products";
+import { ReviewRepository } from "./db/reviewRepository";
+import { ReviewService } from "./services/reviewService";
+import { handleReviews } from "./routes/reviews";
 
 const userRepo = new UserRepository();
 const productRepo = new ProductRepository();
@@ -31,6 +34,8 @@ const paymentService = new PaymentService(orderRepo);
 const orderService = new OrderService(orderRepo, cartService, paymentService, inventoryService);
 const notificationService = new NotificationService(userService);
 const searchService = new SearchService(productService, inventoryService);
+const reviewRepo = new ReviewRepository();
+const reviewService = new ReviewService(reviewRepo, productService);
 
 const PORT = process.env.PORT ?? 3001;
 
@@ -46,6 +51,8 @@ const server = http.createServer((req, res) => {
     handleCart(req, res, cartService, userId);
   } else if (url.startsWith("/orders")) {
     handleOrders(req, res, orderService, userId);
+  } else if (url.startsWith("/reviews")) {
+    handleReviews(req, res, reviewService, userId);
   } else if (url === "/health") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
@@ -53,7 +60,7 @@ const server = http.createServer((req, res) => {
         status: "ok",
         services: [
           "auth", "user", "product", "inventory",
-          "cart", "order", "payment", "notification", "search",
+          "cart", "order", "payment", "notification", "search", "review",
         ],
         uptime: process.uptime(),
       })

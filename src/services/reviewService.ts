@@ -1,3 +1,6 @@
+import { ReviewRepository } from "../db/reviewRepository";
+import { ProductService } from "./productService";
+
 export type Rating = 1 | 2 | 3 | 4 | 5;
 export type SortOrder = "newest" | "oldest" | "highest" | "lowest" | "helpful";
 
@@ -37,8 +40,6 @@ export interface ReviewPage {
   pageSize: number;
 }
 
-const store = new Map<string, Review>();
-
 function assertValidRating(rating: number): asserts rating is Rating {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
     throw new Error("Rating must be an integer between 1 and 5");
@@ -54,6 +55,11 @@ const SORT_FNS: Record<SortOrder, (a: Review, b: Review) => number> = {
 };
 
 export class ReviewService {
+  constructor(
+    private repo: ReviewRepository,
+    private productService: ProductService
+  ) {}
+
   async submitReview(
     productId: string,
     userId: string,
@@ -63,10 +69,9 @@ export class ReviewService {
     verified = false
   ): Promise<Review> {
     assertValidRating(rating);
+    await this.productService.getProduct(productId);
 
-    const existing = [...store.values()].find(
-      (r) => r.productId === productId && r.userId === userId
-    );
+    const existing = await this.repo.findByProductAndUser(productId, userId);
     if (existing) throw new Error("User has already reviewed this product");
 
     const now = new Date();
@@ -82,8 +87,7 @@ export class ReviewService {
       createdAt: now,
       updatedAt: now,
     };
-    store.set(review.id, review);
-    return review;
+    return this.repo.save(review);
   }
 
   async updateReview(
@@ -102,25 +106,22 @@ export class ReviewService {
       ...(updates.body !== undefined && { body: updates.body.trim() }),
       updatedAt: new Date(),
     };
-    store.set(id, updated);
-    return updated;
+    return this.repo.save(updated);
   }
 
   async deleteReview(id: string, requestingUserId: string): Promise<void> {
     const review = await this.getReview(id);
     if (review.userId !== requestingUserId) throw new Error("Not authorized to delete this review");
-    store.delete(id);
+    await this.repo.delete(id);
   }
 
   async markHelpful(id: string): Promise<Review> {
     const review = await this.getReview(id);
-    const updated = { ...review, helpfulVotes: review.helpfulVotes + 1 };
-    store.set(id, updated);
-    return updated;
+    return this.repo.save({ ...review, helpfulVotes: review.helpfulVotes + 1 });
   }
 
   async getReview(id: string): Promise<Review> {
-    const review = store.get(id);
+    const review = await this.repo.findById(id);
     if (!review) throw new Error(`Review ${id} not found`);
     return review;
   }
@@ -128,7 +129,7 @@ export class ReviewService {
   async listReviews(productId: string, options: ListReviewsOptions = {}): Promise<ReviewPage> {
     const { sortBy = "newest", filterRating, verifiedOnly = false, page = 1, pageSize = 10 } = options;
 
-    let reviews = [...store.values()].filter((r) => r.productId === productId);
+    let reviews = await this.repo.findByProductId(productId);
     if (filterRating !== undefined) reviews = reviews.filter((r) => r.rating === filterRating);
     if (verifiedOnly) reviews = reviews.filter((r) => r.verified);
 
@@ -140,7 +141,7 @@ export class ReviewService {
   }
 
   async getSummary(productId: string): Promise<ReviewSummary> {
-    const { reviews } = await this.listReviews(productId, { pageSize: Infinity });
+    const reviews = await this.repo.findByProductId(productId);
     const distribution: Record<Rating, number> = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
     let total = 0;
     for (const r of reviews) {
